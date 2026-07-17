@@ -1,0 +1,86 @@
+# Cold Outreach CRM — PLAN.md
+
+## What this is
+A local-only lead tracker for cold outreach (email + WhatsApp) to business owners found via Google Maps. Portfolio project + real tool for personal use. NOT hosted — runs locally via `npm run dev` / `node server.js`.
+
+## Hard constraints
+- **Timebox: 3 steps.** Started [DATE]. If Step 3 milestone isn't hit, ship what exists — do not extend scope.
+- **No Gmaps scraping.** Leads are entered manually (name, email, WA number) — user finds them via Google Maps himself.
+- **No WhatsApp auto-send.** WA messages generate a `wa.me?text=...` prefill link only. User clicks send inside WhatsApp manually. (Automating WA send violates WhatsApp Business API ToS re: opt-in for cold contacts — real ban risk.)
+- **Email auto-send is allowed** via Gmail API with OAuth (user's own Google account, explicit consent).
+- **YAGNI.** No follow-up sequences, no reply detection/IMAP polling, no CRM integrations, no multi-user auth. This is a single-user local tool.
+
+## Stack
+- Node.js + Express
+- SQLite (better-sqlite3 or similar — matches the appointment-booking-system project, zero setup)
+- Minimal server-rendered views or a simple static frontend (no need for a frontend framework — keep it light)
+- Google APIs Node client (`googleapis`) for Gmail send via OAuth2
+
+## Data model
+
+**leads**
+| field | type | notes |
+|---|---|---|
+| id | int PK | |
+| business_name | text | |
+| email | text | nullable |
+| wa_number | text | nullable, E.164 format |
+| note | text | personalized observation, e.g. "no online ordering" |
+| status | text | `not_sent` \| `sent` \| `replied` |
+| created_at | datetime | |
+
+**templates**
+| field | type | notes |
+|---|---|---|
+| id | int PK | |
+| name | text | e.g. "No website", "Has website — AI automation pitch" |
+| channel | text | `email` \| `wa` |
+| subject | text | nullable, email only |
+| body | text | supports placeholders: `{business_name}`, `{note}` |
+
+## Day-by-day milestones
+
+### Step 1 — Core data + templates
+- [ ] Project scaffold, SQLite schema (leads, templates)
+- [ ] CRUD routes/views for leads (add/edit/list — includes personalized `note` field)
+- [ ] CRUD routes/views for templates (add/edit/list — name, channel, subject if email, body with placeholders)
+- [ ] On a lead's page: template dropdown, **filtered to only show templates matching the channel you're about to send with** (email templates when sending email, WA templates when sending WA) — prevents picking the wrong template for the channel
+- [ ] "Generate" flow: pick lead + pick template → merge `{business_name}` and `{note}` into template body → render filled text as a preview on screen
+- **Milestone:** Create 2-3 templates, add a lead, pick a template, see correctly filled-in preview text.
+
+**Confirmed UX flow (for reference while building):**
+1. Build a small library of templates first (e.g. "No website", "Has website — AI automation pitch"), each tagged email or WA
+2. Add a lead: business name, email, WA number, personalized note
+3. On the lead's page, pick a template (dropdown filtered by channel)
+4. App shows merged preview text
+5. Send Email (real Gmail send) or Open WA (prefill link, manual send)
+6. Editing a template later only affects future sends — doesn't retroactively change anything already sent
+
+### Step 2 — Send infrastructure
+- [ ] Google Cloud project + OAuth consent screen + Gmail API scope (manual setup in Google Console, not code)
+- [ ] OAuth flow in app (login once, store token)
+- [ ] "Send Email" button → calls Gmail API → actually sends
+- [ ] "Send WA" button → generates and opens `wa.me?text=` link (no auto-send)
+- **Milestone:** Send one real test email through the app to your own inbox.
+
+### Step 3 — Status + polish + real use
+- [ ] Status field: not_sent / sent / replied, updatable from dashboard
+- [ ] Dashboard: list all leads, filter by status
+- [ ] Use the app for real: send 3+ real cold emails to real leads (not test data)
+- **Hard stop.** Whatever state it's in at the end of Step 3 is shipped. No "just one more feature."
+
+## Explicitly out of scope (do not build)
+- Google Maps scraping/API lookup
+- WhatsApp auto-send via API or unofficial automation
+- Reply detection / inbox polling
+- Follow-up sequences / drip campaigns
+- Multi-user support, deployment/hosting
+- A/B testing, analytics, CRM integrations
+
+## Current status
+_(Update this section each session so context carries over.)_
+
+- Step: 1 complete
+- Last completed: Scaffold, SQLite schema, leads CRUD, templates CRUD, generate preview, WA prefill link
+- Next up: Step 2 — Google Cloud setup (manual), OAuth flow, Gmail send button
+- Blockers: —

@@ -1,0 +1,13 @@
+{
+  "name": "cold-lead-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^4.22.2"
+  }
+}
