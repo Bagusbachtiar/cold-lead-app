@@ -20,4 +20,22 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`);
+
+// add channel column if not exists
+const cols = db.prepare('PRAGMA table_info(leads)').all().map(c => c.name);
+if (!cols.includes('channel')) db.exec('ALTER TABLE leads ADD COLUMN channel TEXT');
+
+// backfill channel from old status values, then normalize status
+db.exec(`
+  UPDATE leads SET channel='gmail' WHERE status='sent_gmail' AND channel IS NULL;
+  UPDATE leads SET channel='wa'    WHERE status='sent_wa'    AND channel IS NULL;
+  UPDATE leads SET status='waiting' WHERE status NOT IN ('waiting','doing','replied');
+`);
+
 module.exports = db;
