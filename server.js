@@ -63,6 +63,7 @@ function layout(title, body, { back } = {}) {
 <html lang="en" class="dark">
 <head>
   <meta charset="utf-8">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(title)} — ColdReach</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -71,12 +72,13 @@ function layout(title, body, { back } = {}) {
 </head>
 <body class="bg-gray-950 min-h-screen text-gray-100">
 
-  <nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-8">
+  <nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex flex-wrap items-center gap-x-8 gap-y-3">
     <a href="/" class="font-bold text-sm tracking-widest uppercase text-white">ColdReach</a>
     <div class="flex gap-6 text-sm">
       <a href="/"              class="text-gray-500 hover:text-white transition-colors">Dashboard</a>
       <a href="/leads/new"     class="text-gray-500 hover:text-white transition-colors">+ Lead</a>
       <a href="/templates"     class="text-gray-500 hover:text-white transition-colors">Templates</a>
+      <a href="/jobs"          class="text-gray-500 hover:text-white transition-colors">Jobs</a>
     </div>
     <div class="ml-auto text-xs">
       ${gmailConnected
@@ -117,10 +119,20 @@ app.get('/auth/callback', async (req, res) => {
 
 // ---- DASHBOARD ----
 app.get('/', (req, res) => {
-  const { status } = req.query;
-  const leads = status
-    ? db.prepare('SELECT * FROM leads WHERE status = ? ORDER BY created_at DESC').all(status)
-    : db.prepare('SELECT * FROM leads ORDER BY created_at DESC').all();
+  const { status, q: rawQ, page: rawPage } = req.query;
+  const search = (rawQ || '').trim();
+  const page   = Math.max(1, parseInt(rawPage) || 1);
+  const limit  = 10;
+  const offset = (page - 1) * limit;
+
+  const conds = [], cparams = [];
+  if (status) { conds.push("status = ?"); cparams.push(status); }
+  if (search) { conds.push("business_name LIKE ?"); cparams.push(`%${search}%`); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+
+  const leads      = db.prepare(`SELECT * FROM leads ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...cparams, limit, offset);
+  const total      = db.prepare(`SELECT COUNT(*) as n FROM leads ${where}`).get(...cparams).n;
+  const totalPages = Math.ceil(total / limit) || 1;
 
   const counts = db.prepare(`
     SELECT COUNT(*) as total,
@@ -130,13 +142,24 @@ app.get('/', (req, res) => {
     FROM leads
   `).get();
 
-  const stats = [
-    { label: 'All',     value: counts.total,   href: '/',                 active: !status,               color: 'text-white' },
-    { label: 'Waiting', value: counts.waiting, href: '/?status=waiting',  active: status === 'waiting',  color: 'text-gray-300' },
-    { label: 'Doing',   value: counts.doing,   href: '/?status=doing',    active: status === 'doing',    color: 'text-orange-400' },
-    { label: 'Replied', value: counts.replied, href: '/?status=replied',  active: status === 'replied',  color: 'text-purple-400' },
-  ].map(s => `
-    <a href="${s.href}" class="${CARD} p-4 hover:border-gray-600 transition-all ${s.active ? 'ring-2 ring-blue-500 border-blue-500' : ''}">
+  function pageUrl(p) {
+    const parts = [status && `status=${status}`, search && `q=${encodeURIComponent(search)}`, p > 1 && `page=${p}`].filter(Boolean);
+    return parts.length ? '/?' + parts.join('&') : '/';
+  }
+
+  function statusUrl(s) {
+    const parts = [s && `status=${s}`, search && `q=${encodeURIComponent(search)}`].filter(Boolean);
+    return parts.length ? '/?' + parts.join('&') : '/';
+  }
+
+  const statDefs = [
+    { label: 'All',     value: counts.total,   key: null,      color: 'text-white' },
+    { label: 'Waiting', value: counts.waiting,  key: 'waiting', color: 'text-gray-300' },
+    { label: 'Doing',   value: counts.doing,    key: 'doing',   color: 'text-orange-400' },
+    { label: 'Replied', value: counts.replied,  key: 'replied', color: 'text-purple-400' },
+  ];
+  const stats = statDefs.map(s => `
+    <a href="${statusUrl(s.key)}" class="${CARD} p-4 hover:border-gray-600 transition-all ${status === s.key || (!status && !s.key) ? 'ring-2 ring-blue-500 border-blue-500' : ''}">
       <div class="text-3xl font-bold ${s.color}">${s.value ?? 0}</div>
       <div class="text-xs text-gray-600 mt-1 font-medium uppercase tracking-wide">${s.label}</div>
     </a>`).join('');
@@ -144,22 +167,23 @@ app.get('/', (req, res) => {
   const STATUS_LABELS = { waiting: 'Waiting', doing: 'Doing', replied: 'Replied' };
 
   const rows = leads.length
-    ? leads.map(l => `
-      <tr data-name="${esc(l.business_name)}"
-          x-show="!q || $el.dataset.name.toLowerCase().includes(q.toLowerCase())"
-          class="hover:bg-gray-800/50 transition-colors">
+    ? leads.map((l, i) => `
+      <tr class="hover:bg-gray-800/50 transition-colors">
+        <td class="px-4 py-3.5 text-xs text-gray-600 w-8">${offset + i + 1}</td>
         <td class="px-5 py-3.5 text-sm font-semibold">
-          <div class="flex items-center gap-2">
-            <a href="/leads/${l.id}" class="text-blue-400 hover:text-blue-300">${esc(l.business_name)}</a>
-            ${channelBadge(l.channel)}
-          </div>
+          <a href="/leads/${l.id}" class="text-blue-400 hover:text-blue-300">${esc(l.business_name)}</a>
         </td>
-        <td class="px-5 py-3.5 text-sm text-gray-400">${l.email ? esc(l.email) : '<span class="text-gray-700">—</span>'}</td>
+        <td class="px-5 py-3.5">${channelBadge(l.channel)}</td>
+        <td class="px-5 py-3.5 text-sm text-gray-400">${
+          l.channel === 'wa' && l.wa_number ? esc(l.wa_number)
+          : l.email ? esc(l.email)
+          : '<span class="text-gray-700">—</span>'
+        }</td>
         <td class="px-5 py-3.5">
           <form method="POST" action="/leads/${l.id}/status" x-data="{ s: '${l.status}' }">
             <select name="status" x-model="s" onchange="this.form.submit()"
                     :class="{
-                      'text-gray-300 border-gray-600 bg-gray-800':         s === 'waiting',
+                      'text-gray-300 border-gray-600 bg-gray-800':          s === 'waiting',
                       'text-orange-400 border-orange-800 bg-orange-900/30': s === 'doing',
                       'text-purple-400 border-purple-800 bg-purple-900/30': s === 'replied'
                     }"
@@ -180,24 +204,35 @@ app.get('/', (req, res) => {
         </td>
         <td class="px-5 py-3.5 text-sm text-gray-600">${l.created_at.slice(0, 10)}</td>
       </tr>`).join('')
-    : `<tr><td colspan="5" class="px-5 py-12 text-center text-sm text-gray-600">
+    : `<tr><td colspan="7" class="px-5 py-12 text-center text-sm text-gray-600">
          No leads yet. <a href="/leads/new" class="text-blue-400 font-medium">Add your first lead</a>.
        </td></tr>`;
 
+  const pgLinks = [];
+  if (page > 1)        pgLinks.push(`<a href="${pageUrl(page-1)}" class="px-3 py-1.5 text-xs bg-gray-800 text-gray-400 hover:text-white rounded">&#8592;</a>`);
+  for (let p = 1; p <= totalPages; p++)
+    pgLinks.push(`<a href="${pageUrl(p)}" class="px-3 py-1.5 text-xs rounded ${p === page ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}">${p}</a>`);
+  if (page < totalPages) pgLinks.push(`<a href="${pageUrl(page+1)}" class="px-3 py-1.5 text-xs bg-gray-800 text-gray-400 hover:text-white rounded">&#8594;</a>`);
+
   res.send(layout('Dashboard', `
     <div class="grid grid-cols-4 gap-4 mb-8">${stats}</div>
-    <div class="${CARD} overflow-hidden" x-data="{ q: '', modal: false, noteId: null, noteText: '' }">
+    <div class="${CARD} overflow-hidden" x-data="{ modal: false, noteId: null, noteText: '' }">
       <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-800 gap-4">
         <h2 class="text-sm font-semibold text-gray-300 shrink-0">All Leads</h2>
-        <input x-model="q" type="search" placeholder="Search business name…"
-               class="flex-1 max-w-xs bg-gray-800 border border-gray-700 rounded-md px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <form method="GET" class="flex-1 max-w-xs flex">
+          ${status ? `<input type="hidden" name="status" value="${esc(status)}">` : ''}
+          <input type="search" name="q" value="${esc(search)}" placeholder="Search business name…"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </form>
         <a href="/leads/new" class="${BTN_SM} shrink-0">+ Add Lead</a>
       </div>
       <table class="w-full">
         <thead class="bg-gray-800/50 border-b border-gray-800">
           <tr class="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+            <th class="px-4 py-3 text-left w-8">#</th>
             <th class="px-5 py-3 text-left">Business</th>
-            <th class="px-5 py-3 text-left">Email</th>
+            <th class="px-5 py-3 text-left">Channel</th>
+            <th class="px-5 py-3 text-left">Contact</th>
             <th class="px-5 py-3 text-left">Status</th>
             <th class="px-5 py-3 text-left">Note</th>
             <th class="px-5 py-3 text-left">Added</th>
@@ -205,6 +240,11 @@ app.get('/', (req, res) => {
         </thead>
         <tbody class="divide-y divide-gray-800/60">${rows}</tbody>
       </table>
+      ${totalPages > 1 ? `
+      <div class="flex items-center gap-1.5 px-5 py-3.5 border-t border-gray-800">
+        ${pgLinks.join('')}
+        <span class="ml-auto text-xs text-gray-600">${total} total</span>
+      </div>` : ''}
 
       <!-- Note modal -->
       <div x-show="modal" x-cloak
@@ -232,13 +272,31 @@ app.get('/leads/new', (req, res) => {
   const templateOpts = templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
 
   res.send(layout('New Lead', `
-    <div class="${CARD} p-6 max-w-xl">
+    <div class="${CARD} p-6 max-w-xl" x-data="{ ch: 'gmail' }">
       <form method="GET" action="/preview">
+        <input type="hidden" name="channel" :value="ch">
+
+        <div class="flex gap-2 mb-6">
+          <button type="button" @click="ch = 'gmail'"
+                  :class="ch === 'gmail' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'"
+                  class="px-4 py-1.5 rounded-md text-sm font-medium transition-colors">Gmail</button>
+          <button type="button" @click="ch = 'wa'"
+                  :class="ch === 'wa' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'"
+                  class="px-4 py-1.5 rounded-md text-sm font-medium transition-colors">WA</button>
+        </div>
+
         <label class="${LABEL}">Business Name <span class="text-red-500">*</span></label>
         <input class="${INPUT}" name="business_name" required autofocus placeholder="e.g. Warung Pak Budi">
 
-        <label class="${LABEL}">Email</label>
-        <input class="${INPUT}" name="email" type="email" placeholder="owner@business.com">
+        <div x-show="ch === 'gmail'">
+          <label class="${LABEL}">Email</label>
+          <input class="${INPUT}" name="email" type="email" placeholder="owner@business.com">
+        </div>
+
+        <div x-show="ch === 'wa'">
+          <label class="${LABEL}">WhatsApp Number</label>
+          <input class="${INPUT}" name="wa_number" type="tel" placeholder="e.g. 6281234567890">
+        </div>
 
         ${templateOpts ? `
         <label class="${LABEL}">Template</label>
@@ -256,18 +314,19 @@ app.get('/leads/new', (req, res) => {
 
 // Standalone preview — no DB save yet, happens on send
 app.get('/preview', (req, res) => {
-  const { business_name, email, wa_number, template_id } = req.query;
+  const { business_name, email, wa_number, template_id, channel } = req.query;
   if (!business_name || !template_id) return res.redirect('/leads/new');
   const tmpl = db.prepare('SELECT * FROM templates WHERE id = ?').get(template_id);
   if (!tmpl) return res.redirect('/leads/new');
 
-  const merged = tmpl.body.replace(/{business_name}/g, business_name);
-  const subject = tmpl.subject || tmpl.name;
+  const note = req.query.note || '';
+  const fill = s => s.replace(/{business_name}/g, business_name).replace(/{note}/g, note);
+  const merged  = fill(tmpl.body);
+  const subject = fill(tmpl.subject || tmpl.name);
 
   const hiddenFields = `
     <input type="hidden" name="business_name" value="${esc(business_name)}">
     <input type="hidden" name="email"         value="${esc(email || '')}">
-    <input type="hidden" name="wa_number"     value="${esc(wa_number || '')}">
     <input type="hidden" name="template_id"   value="${esc(template_id)}">
     <input type="hidden" name="subject"       value="${esc(subject)}">
     <input type="hidden" name="merged"        value="${esc(merged)}">`;
@@ -282,14 +341,25 @@ app.get('/preview', (req, res) => {
       : `<a href="/auth/login" class="${BTN}">Connect Gmail to Send</a>`
     : `<span class="text-xs text-gray-600">No email — go back to add one</span>`;
 
-  const waBtn = wa_number
-    ? `<form method="POST" action="/send-wa">
-        ${hiddenFields}
-        <button type="submit" class="inline-flex items-center px-4 py-2 bg-green-700 hover:bg-green-600 text-white text-sm font-medium rounded-md transition-colors">
-          Send via WhatsApp
-        </button>
-      </form>`
-    : '';
+  const waSection = `
+    <button id="copyBtn" onclick="copyMsg()"
+            class="inline-flex items-center px-4 py-2 bg-green-700 hover:bg-green-600 text-white text-sm font-medium rounded-md transition-colors">
+      Copy Message
+    </button>
+    <form method="POST" action="/save-wa">
+      <input type="hidden" name="business_name" value="${esc(business_name)}">
+      <input type="hidden" name="wa_number" value="${esc(wa_number || '')}">
+      <button type="submit" class="${BTN_GHOST}">Save Lead (WA)</button>
+    </form>
+    <script>
+    function copyMsg() {
+      navigator.clipboard.writeText(${JSON.stringify(merged)}).then(() => {
+        const b = document.getElementById('copyBtn');
+        b.textContent = 'Copied!';
+        setTimeout(() => b.textContent = 'Copy Message', 2000);
+      });
+    }
+    </script>`;
 
   res.send(layout(`Preview — ${esc(business_name)}`, `
     <div class="space-y-4 max-w-2xl">
@@ -302,24 +372,27 @@ app.get('/preview', (req, res) => {
       <div class="${CARD} px-5 py-4 text-sm divide-y divide-gray-800">
         <div class="flex gap-3 py-2.5 items-center first:pt-0 last:pb-0">
           <span class="w-16 shrink-0 text-gray-600 font-medium">To</span>
-          ${email ? (() => {
-            const AVATAR_COLORS = ['4f46e5','0891b2','059669','d97706','dc2626','7c3aed','db2777'];
-            const color = AVATAR_COLORS[email.charCodeAt(0) % AVATAR_COLORS.length];
-            const initials = email.slice(0, 2).toUpperCase();
-            const gravatar = `https://www.gravatar.com/avatar/${crypto.createHash('md5').update(email.trim().toLowerCase()).digest('hex')}?s=28&d=404`;
-            return `<div class="flex items-center gap-2.5">
-              <div class="relative w-7 h-7 shrink-0">
-                <div style="background:#${color}" class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold">${initials}</div>
-                <img src="${gravatar}" class="w-7 h-7 rounded-full absolute inset-0" onerror="this.remove()">
-              </div>
-              <span class="text-gray-200">${esc(email)}</span>
-            </div>`;
-          })() : '<span class="text-gray-600">—</span>'}
+          ${channel === 'wa' && wa_number
+            ? `<span class="text-green-400 font-medium">${esc(wa_number)}</span>`
+            : email ? (() => {
+                const AVATAR_COLORS = ['4f46e5','0891b2','059669','d97706','dc2626','7c3aed','db2777'];
+                const color = AVATAR_COLORS[email.charCodeAt(0) % AVATAR_COLORS.length];
+                const initials = email.slice(0, 2).toUpperCase();
+                const gravatar = `https://www.gravatar.com/avatar/${crypto.createHash('md5').update(email.trim().toLowerCase()).digest('hex')}?s=28&d=404`;
+                return `<div class="flex items-center gap-2.5">
+                  <div class="relative w-7 h-7 shrink-0">
+                    <div style="background:#${color}" class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold">${initials}</div>
+                    <img src="${gravatar}" class="w-7 h-7 rounded-full absolute inset-0" onerror="this.remove()">
+                  </div>
+                  <span class="text-gray-200">${esc(email)}</span>
+                </div>`;
+              })() : '<span class="text-gray-600">—</span>'}
         </div>
+        ${channel !== 'wa' ? `
         <div class="flex gap-3 py-2.5 items-center first:pt-0 last:pb-0">
           <span class="w-16 shrink-0 text-gray-600 font-medium">Subject</span>
           <span class="text-gray-200">${esc(subject)}</span>
-        </div>
+        </div>` : ''}
       </div>
 
       <div class="${CARD} px-5 py-5">
@@ -327,8 +400,7 @@ app.get('/preview', (req, res) => {
       </div>
 
       <div class="flex items-center gap-4 flex-wrap">
-        ${gmailBtn}
-        ${waBtn}
+        ${channel === 'wa' ? waSection : gmailBtn}
       </div>
     </div>
   `, { back: { href: '/leads/new', label: 'New Lead' } }));
@@ -380,24 +452,12 @@ app.post('/send-gmail', async (req, res) => {
   }
 });
 
-app.post('/send-wa', (req, res) => {
-  const { business_name, email, wa_number, merged } = req.body;
-  if (!business_name || !wa_number) return res.redirect('/leads/new');
-  db.prepare('INSERT INTO leads (business_name, email, wa_number, channel, status) VALUES (?, ?, ?, ?, ?)')
-    .run(business_name, email || null, wa_number, 'wa', 'waiting');
-  const digits = wa_number.replace(/\D/g, '');
-  const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(merged)}`;
-  res.send(layout('Opening WhatsApp…', `
-    <div class="${CARD} p-6 max-w-md space-y-4">
-      <p class="text-gray-300 text-sm">Lead saved. WhatsApp should open automatically.</p>
-      <a href="${waUrl}" target="_blank" rel="noopener"
-         class="inline-flex items-center px-4 py-2 bg-green-700 hover:bg-green-600 text-white text-sm font-medium rounded-md transition-colors">
-        Open WhatsApp manually
-      </a>
-      <div><a href="/" class="${BTN_GHOST}">Go to Dashboard</a></div>
-    </div>
-    <script>window.open(${JSON.stringify(waUrl)}, '_blank');</script>
-  `));
+app.post('/save-wa', (req, res) => {
+  const { business_name, wa_number } = req.body;
+  if (!business_name) return res.redirect('/leads/new');
+  db.prepare('INSERT INTO leads (business_name, wa_number, channel, status) VALUES (?, ?, ?, ?)')
+    .run(business_name, wa_number || null, 'wa', 'waiting');
+  res.redirect('/');
 });
 
 app.get('/leads/:id', (req, res) => {
@@ -513,7 +573,7 @@ app.get('/templates', (req, res) => {
       <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-800">
         <div>
           <h2 class="text-sm font-semibold text-gray-300">Message Templates</h2>
-          <p class="text-xs text-gray-600 mt-0.5">Use <code class="bg-gray-800 px-1 rounded text-gray-400">{business_name}</code> in body</p>
+          <p class="text-xs text-gray-600 mt-0.5">Use <code class="bg-gray-800 px-1 rounded text-gray-400">{business_name}</code> <code class="bg-gray-800 px-1 rounded text-gray-400">{note}</code> in subject or body</p>
         </div>
         <a href="/templates/new" class="${BTN_SM}">+ New Template</a>
       </div>
@@ -541,10 +601,10 @@ function templateForm(t = {}) {
                placeholder='e.g. "No website pitch"' required autofocus>
 
         <label class="${LABEL}">Email Subject <span class="text-gray-600 font-normal">(optional — used when sending via Gmail)</span></label>
-        <input class="${INPUT}" name="subject" value="${t.subject ? esc(t.subject) : ''}" placeholder="e.g. Quick idea for your business">
+        <input class="${INPUT}" name="subject" value="${t.subject ? esc(t.subject) : ''}" placeholder="e.g. Quick idea for {business_name}">
 
         <label class="${LABEL}">Body <span class="text-red-500">*</span></label>
-        <p class="text-xs text-gray-600 mt-1">Use <code class="bg-gray-800 px-1 rounded text-gray-400">{business_name}</code> as placeholder</p>
+        <p class="text-xs text-gray-600 mt-1">Use <code class="bg-gray-800 px-1 rounded text-gray-400">{business_name}</code> and <code class="bg-gray-800 px-1 rounded text-gray-400">{note}</code> — work in subject and body</p>
         <textarea class="${INPUT}" name="body" rows="14" required>${t.body ? esc(t.body) : ''}</textarea>
 
         <div class="flex items-center gap-4 mt-6">
@@ -586,4 +646,10 @@ app.post('/templates/:id/delete', (req, res) => {
   res.redirect('/templates');
 });
 
-app.listen(3000, () => console.log('ColdReach running → http://localhost:3000'));
+require('./jobs')(app, db, { layout, esc, INPUT, LABEL, BTN, BTN_SM, BTN_GHOST, CARD });
+
+const PORT = process.env.PORT || 3000;
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`ColdReach running → http://localhost:${PORT}`));
+}
+module.exports = app;

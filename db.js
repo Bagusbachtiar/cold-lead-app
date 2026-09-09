@@ -25,6 +25,17 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS job_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    role TEXT NOT NULL,
+    applied_on TEXT NOT NULL,
+    job_url TEXT,
+    status TEXT NOT NULL DEFAULT 'applied'
+      CHECK(status IN ('applied', 'interviewing', 'offer', 'rejected', 'withdrawn')),
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // add channel column if not exists

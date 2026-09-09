@@ -80,7 +80,27 @@ A local-only lead tracker for cold outreach (email + WhatsApp) to business owner
 ## Current status
 _(Update this section each session so context carries over.)_
 
-- Step: 1 complete
-- Last completed: Scaffold, SQLite schema, leads CRUD, templates CRUD, generate preview, WA prefill link
-- Next up: Step 2 — Google Cloud setup (manual), OAuth flow, Gmail send button
-- Blockers: —
+- Steps 1, 2, 3: all complete and pushed to main
+- App is feature-complete per the original 3-step timebox
+- User-requested extension (2026-09-09): added a Jobs page for manually tracking job applications alongside freelance outreach.
+- Job applications: company, role, date applied, optional posting link and notes; create/edit/delete, status updates, search, filters, and pagination. Statuses: applied / interviewing / offer / rejected / withdrawn.
+- Implementation: `jobs.js` routes and views, a separate SQLite `job_applications` table, and Jobs navigation. No Gmail connection required.
+- Validation: `npm test` passes all 7 tests covering the application workflow, invalid input, persistence, and preservation of outreach records; JavaScript syntax and whitespace checks passed.
+
+### What's been built
+- Leads CRUD (business name, email, wa_number, note, status, channel)
+- Templates CRUD (name, subject, body with `{business_name}` placeholder)
+- New lead form: Gmail/WA toggle at top — Gmail shows email field, WA shows phone number field
+- Preview page: merged template, Gmail send (real OAuth), WA shows copy button + "Save Lead (WA)"
+- Gmail OAuth2 via `googleapis`, token stored in SQLite `settings` table, auto-refresh
+- Dashboard: stat cards (All/Waiting/Doing/Replied), server-side search (`?q=`), server-side pagination (10/page), columns: #, Business, Channel badge, Contact (email or WA number), Status dropdown (inline, colored), Note (modal), Added date
+- Status values: `waiting`, `doing`, `replied`
+- Channel values: `gmail`, `wa` (separate column from status)
+- Note modal: Alpine.js, opens inline from dashboard row
+
+### Credentials
+- `.env` has Google OAuth credentials (gitignored)
+- OAuth token stored in SQLite `settings` table (key=`gmail_token`)
+
+### Blockers / next ideas (not in scope yet)
+- None blocking. Real use: add actual leads, send cold emails.
