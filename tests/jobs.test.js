@@ -24,7 +24,15 @@ test('job application workflow persists data and leaves outreach records alone',
     db = require('../db');
     db.prepare("INSERT INTO leads (business_name, status) VALUES ('Existing lead', 'waiting')").run();
     db.prepare("INSERT INTO templates (name, channel, body) VALUES ('Existing template', 'email', 'Hello')").run();
-    // Re-running the schema is safe for existing installations.
+    // Simulate an existing installation before the optional source field was added.
+    db.exec('ALTER TABLE job_applications DROP COLUMN source');
+    db.prepare("INSERT INTO job_applications (id, company, role, applied_on) VALUES (-1, 'Legacy company', 'Developer', '2026-09-01')").run();
+    db.close();
+    delete require.cache[require.resolve('../db')];
+    db = require('../db');
+    assert.deepEqual(db.prepare('SELECT company, source FROM job_applications WHERE id=-1').get(), { company: 'Legacy company', source: null });
+    db.prepare('DELETE FROM job_applications WHERE id=-1').run();
+    // The migration also remains safe on subsequent starts.
     db.close();
     delete require.cache[require.resolve('../db')];
     db = require('../db');
@@ -41,7 +49,7 @@ test('job application workflow persists data and leaves outreach records alone',
   });
   const application = {
     company: 'Acme & Co', role: 'Frontend Developer', applied_on: '2026-09-09',
-    job_url: 'https://example.com/jobs/123', status: 'applied', notes: 'Contact Alex\nFollow up next week',
+    source: 'LinkedIn', job_url: 'https://example.com/jobs/123', status: 'applied', notes: 'Contact Alex\nFollow up next week',
   };
 
   await t.test('navigation, empty state, and application form are accessible without Gmail', async () => {
@@ -57,18 +65,38 @@ test('job application workflow persists data and leaves outreach records alone',
     assert.match(html, /Acme &amp; Co/);
     assert.match(html, /Frontend Developer/);
     assert.match(html, /2026-09-09/);
+    assert.match(html, /Found on: LinkedIn/);
     const edited = { ...application, role: 'Senior Developer', notes: '<script>alert(1)</script>\nInterview Monday' };
     assert.equal((await post('/jobs/1/update', edited)).status, 302);
     html = await (await get('/jobs/1/edit')).text();
     assert.match(html, /Senior Developer/);
     assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.equal(db.prepare('SELECT notes FROM job_applications WHERE id=1').get().notes, edited.notes);
+    assert.match(html, /value="LinkedIn"/);
+  });
+
+  await t.test('website sources accept custom names, are searchable, and can be cleared', async () => {
+    const edited = { ...application, role: 'Senior Developer', source: '  Local Jobs & <Community>  ' };
+    assert.equal((await post('/jobs/1/update', edited)).status, 302);
+    assert.equal(db.prepare('SELECT source FROM job_applications WHERE id=1').get().source, 'Local Jobs & <Community>');
+    const html = await (await get('/jobs?q=Community&status=applied')).text();
+    assert.match(html, /Acme &amp; Co/);
+    assert.match(html, /Found on: Local Jobs &amp; &lt;Community&gt;/);
+    assert.match(await (await get('/jobs/1/edit')).text(), /value="Local Jobs &amp; &lt;Community&gt;"/);
+    assert.equal((await post('/jobs/1/update', { ...edited, source: '' })).status, 302);
+    assert.equal(db.prepare('SELECT source FROM job_applications WHERE id=1').get().source, null);
+    const { source, ...withoutSource } = edited;
+    assert.equal((await post('/jobs', withoutSource)).status, 302);
+    const optionalJob = db.prepare('SELECT id, source FROM job_applications ORDER BY id DESC LIMIT 1').get();
+    assert.equal(optionalJob.source, null);
+    assert.equal((await post(`/jobs/${optionalJob.id}/delete`)).status, 302);
   });
 
   await t.test('invalid input is rejected without losing entered fields or changing saved data', async () => {
     for (const change of [
       { company: ' ' }, { role: '' }, { applied_on: '2026-02-30' }, { applied_on: '' },
       { job_url: 'javascript:alert(1)' }, { job_url: 'not a url' }, { status: 'sent' }, { status: 'constructor' },
+      { source: 'x'.repeat(201) },
     ]) {
       const response = await post('/jobs', { ...application, ...change });
       assert.equal(response.status, 400, JSON.stringify(change));
@@ -116,6 +144,7 @@ test('job application workflow persists data and leaves outreach records alone',
     try {
       assert.equal(reopened.prepare('SELECT COUNT(*) AS n FROM job_applications').get().n, 11);
       assert.equal(reopened.prepare('SELECT job_url FROM job_applications LIMIT 1').get().job_url, application.job_url);
+      assert.equal(reopened.prepare('SELECT source FROM job_applications LIMIT 1').get().source, application.source);
     } finally { reopened.close(); }
   });
 });

@@ -83,9 +83,10 @@ _(Update this section each session so context carries over.)_
 - Steps 1, 2, 3: all complete and pushed to main
 - App is feature-complete per the original 3-step timebox
 - User-requested extension (2026-09-09): added a Jobs page for manually tracking job applications alongside freelance outreach.
+- User-requested update (2026-09-10): optional "Found on" website field with suggestions and custom names, shown in the list and included in search. Existing applications keep their data with a blank source until edited.
 - Job applications: company, role, date applied, optional posting link and notes; create/edit/delete, status updates, search, filters, and pagination. Statuses: applied / interviewing / offer / rejected / withdrawn.
 - Implementation: `jobs.js` routes and views, a separate SQLite `job_applications` table, and Jobs navigation. No Gmail connection required.
-- Validation: `npm test` passes all 7 tests covering the application workflow, invalid input, persistence, and preservation of outreach records; JavaScript syntax and whitespace checks passed.
+- Validation: `npm test` passes all 8 tests covering the application workflow, website sources, invalid input, persistence, existing-database migration, and preservation of outreach records; JavaScript syntax and whitespace checks passed.
 
 ### What's been built
 - Leads CRUD (business name, email, wa_number, note, status, channel)

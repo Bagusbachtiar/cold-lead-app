@@ -36,6 +36,16 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
           <input id="role" name="role" class="${INPUT}" value="${esc(job.role || '')}" placeholder="e.g. Frontend Developer" maxlength="200" required>
           <label for="applied_on" class="${LABEL}">Date applied <span class="text-red-400">*</span></label>
           <input id="applied_on" name="applied_on" type="date" class="${INPUT}" value="${esc(job.applied_on ?? today())}" required>
+          <label for="source" class="${LABEL}">Found on <span class="text-gray-600">(optional)</span></label>
+          <input id="source" name="source" list="job-sources" class="${INPUT}" value="${esc(job.source || '')}" placeholder="e.g. LinkedIn, Indeed, or another website" maxlength="200" aria-describedby="source-help">
+          <datalist id="job-sources">
+            <option value="LinkedIn"></option>
+            <option value="Indeed"></option>
+            <option value="Glassdoor"></option>
+            <option value="JobStreet"></option>
+            <option value="Company website"></option>
+          </datalist>
+          <p id="source-help" class="text-xs text-gray-400 mt-1">Choose a suggestion or type any website name.</p>
           <label for="job_url" class="${LABEL}">Job posting link <span class="text-gray-600">(optional)</span></label>
           <input id="job_url" name="job_url" type="url" class="${INPUT}" value="${esc(job.job_url || '')}" placeholder="https://..." maxlength="2000">
           <label for="status" class="${LABEL}">Status</label>
@@ -51,10 +61,11 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
   }
 
   function validate(body) {
-    const job = Object.fromEntries(['company', 'role', 'applied_on', 'job_url', 'status', 'notes'].map(key => [key, string(body[key])]));
+    const job = Object.fromEntries(['company', 'role', 'applied_on', 'source', 'job_url', 'status', 'notes'].map(key => [key, string(body[key])]));
     let error = '';
     if (!job.company || !job.role) error = 'Company and job title are required.';
     else if (job.company.length > 200 || job.role.length > 200) error = 'Company and job title must be 200 characters or fewer.';
+    else if (job.source.length > 200) error = 'Website name must be 200 characters or fewer.';
     else if (!/^\d{4}-\d{2}-\d{2}$/.test(job.applied_on) || !Number.isFinite(Date.parse(job.applied_on)) || new Date(job.applied_on).toISOString().slice(0, 10) !== job.applied_on) error = 'Enter a valid application date.';
     else if (!validStatus(job.status)) error = 'Choose a valid application status.';
     else if (job.notes.length > 10000) error = 'Notes must be 10,000 characters or fewer.';
@@ -74,8 +85,8 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
     const status = validStatus(string(req.query.status)) ? string(req.query.status) : '';
     const conditions = [], params = [];
     if (search) {
-      conditions.push('(company LIKE ? OR role LIKE ?)');
-      params.push(`%${search}%`, `%${search}%`);
+      conditions.push('(company LIKE ? OR role LIKE ? OR source LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (status) { conditions.push('status = ?'); params.push(status); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -97,6 +108,7 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
         <td class="px-4 py-4">
           <a href="/jobs/${job.id}/edit" class="text-blue-400 font-semibold break-words">${esc(job.company)}</a>
           <div class="text-gray-300 mt-1 break-words">${esc(job.role)}</div>
+          ${job.source ? `<div class="text-xs text-gray-400 mt-2 break-words">Found on: ${esc(job.source)}</div>` : ''}
           ${job.job_url ? `<a href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer" class="inline-block mt-2 text-xs text-gray-400 hover:text-white underline">View job posting &#8599;</a>` : ''}
         </td>
         <td class="px-4 py-4 whitespace-nowrap text-gray-400">${esc(job.applied_on)}</td>
@@ -125,7 +137,7 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
         <div class="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-gray-800">
           <form method="GET" action="/jobs" class="flex flex-wrap items-center gap-2">
             <input type="hidden" name="status" value="${esc(status)}">
-            <input name="q" type="search" aria-label="Search company or job title" value="${esc(search)}" placeholder="Search company or job title..." class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-60 max-w-full">
+            <input name="q" type="search" aria-label="Search company, job title, or website" value="${esc(search)}" placeholder="Search company, role, website..." class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-60 max-w-full">
             <button type="submit" class="${BTN_SM}">Search</button>
             ${search || status ? `<a href="/jobs" class="${BTN_GHOST}">Clear</a>` : ''}
           </form>
@@ -156,8 +168,8 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
   app.post('/jobs', (req, res) => {
     const { job, error } = validate(req.body);
     if (error) return res.status(400).send(form(job, error));
-    db.prepare('INSERT INTO job_applications (company, role, applied_on, job_url, status, notes) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(job.company, job.role, job.applied_on, job.job_url || null, job.status, job.notes || null);
+    db.prepare('INSERT INTO job_applications (company, role, applied_on, source, job_url, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(job.company, job.role, job.applied_on, job.source || null, job.job_url || null, job.status, job.notes || null);
     res.redirect('/jobs');
   });
 
@@ -170,8 +182,8 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
     if (!findJob(req.params.id)) return notFound(res);
     const { job, error } = validate(req.body);
     if (error) return res.status(400).send(form({ ...job, id: req.params.id }, error));
-    db.prepare('UPDATE job_applications SET company=?, role=?, applied_on=?, job_url=?, status=?, notes=? WHERE id=?')
-      .run(job.company, job.role, job.applied_on, job.job_url || null, job.status, job.notes || null, req.params.id);
+    db.prepare('UPDATE job_applications SET company=?, role=?, applied_on=?, source=?, job_url=?, status=?, notes=? WHERE id=?')
+      .run(job.company, job.role, job.applied_on, job.source || null, job.job_url || null, job.status, job.notes || null, req.params.id);
     res.redirect('/jobs');
   });
 

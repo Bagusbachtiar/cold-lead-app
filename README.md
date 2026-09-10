@@ -83,9 +83,9 @@ On first use, click **Connect Gmail** in the nav and complete the OAuth flow. To
 ### Track job applications
 
 1. Open **Jobs** in the navigation, then **+ Add Application**.
-2. Enter the company, job title, and date you applied. Optionally add the posting link and notes.
+2. Enter the company, job title, and date you applied. Optionally add where you found the job in **Found on** (LinkedIn, Indeed, or any website name), the posting link, and notes.
 3. Save the application. Use the status dropdown and **Update** as you hear back.
-4. Search by company or job title, use the status cards to filter, and choose **Edit** to update details.
+4. Search by company, job title, or website, use the status cards to filter, and choose **Edit** to update details.
 
 Applications are saved locally in SQLite. Gmail connection is not required for this feature.
 

@@ -38,6 +38,10 @@ db.exec(`
   );
 `);
 
+// Add the optional job source to existing databases without changing applications.
+const jobCols = db.prepare('PRAGMA table_info(job_applications)').all().map(c => c.name);
+if (!jobCols.includes('source')) db.exec('ALTER TABLE job_applications ADD COLUMN source TEXT');
+
 // add channel column if not exists
 const cols = db.prepare('PRAGMA table_info(leads)').all().map(c => c.name);
 if (!cols.includes('channel')) db.exec('ALTER TABLE leads ADD COLUMN channel TEXT');
