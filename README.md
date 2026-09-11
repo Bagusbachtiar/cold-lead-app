@@ -10,6 +10,7 @@ Also includes a **Jobs** page for keeping your job application history in one pl
 
 ## Features
 
+- **Saved job websites** — keep an A–Z list of website names to check for jobs; add, edit, and delete them in the scrollable **Job Websites** modal on the Jobs page.
 - **Job applications** — record company, job title, date applied, posting link, and notes; edit or delete records, search by company or role, filter by status, and track Applied / Interviewing / Offer / Rejected / Withdrawn.
 - **Lead management** — add business name, email, or WhatsApp number per lead
 - **Template library** — write reusable message templates with `{business_name}` and `{note}` placeholders, works in both subject and body
@@ -33,6 +34,16 @@ Also includes a **Jobs** page for keeping your job application history in one pl
 No build step. No frontend framework. Runs locally.
 
 ## Setup
+
+### Windows desktop app (one-click launch)
+
+Double-click the **ColdReach** desktop shortcut, or `dist/ColdReach-win32-x64/ColdReach.exe`. It starts its local server and opens a dedicated window. Closing that window shuts down the server and the app; there is no tray process or Windows startup service. Opening it twice focuses the existing window.
+
+The desktop build uses this project's existing `data.db` and `.env`; it does not create a second database or bundle your private data into the executable. Keep the project folder and the entire `dist/ColdReach-win32-x64` folder in place. The database location is recorded in `dist/ColdReach-win32-x64/resources/coldreach-local.json`.
+
+The desktop app chooses an available local port, so other local apps can keep running. Gmail sign-in opens in your normal browser and temporarily needs port 3000 for Google's existing callback; if another app is using that port, close it temporarily before connecting Gmail. Existing Gmail tokens and the other features work on the desktop app's own port. Internet is still needed for Gmail and the UI's existing CDN resources.
+
+For development, `npm run desktop` opens the wrapper. After changing the code, run `npm run desktop:build` to update the executable. On a fresh checkout, install dependencies and run `node node_modules/electron/install.js` to download the Electron runtime first. `npm run desktop:test` checks the packaged window and shutdown using temporary data. `desktop/shortcut.ps1` creates the Windows desktop shortcut after building.
 
 ### 1. Clone and install
 
@@ -83,11 +94,19 @@ On first use, click **Connect Gmail** in the nav and complete the OAuth flow. To
 ### Track job applications
 
 1. Open **Jobs** in the navigation, then **+ Add Application**.
-2. Enter the company, job title, and date you applied. Optionally add where you found the job in **Found on** (LinkedIn, Indeed, or any website name), the posting link, and notes.
+2. Enter the company, job title, and date you applied. **Found on** is an optional dropdown populated from your saved **Job Websites**. Select a website, then optionally add the posting link and notes.
 3. Save the application. Use the status dropdown and **Update** as you hear back.
 4. Search by company, job title, or website, use the status cards to filter, and choose **Edit** to update details.
 
 Applications are saved locally in SQLite. Gmail connection is not required for this feature.
+
+Applications link to saved websites: renaming a website updates its name in application lists and searches. Deleting a website keeps the applications and their last saved website name. Older free-text sources are linked to matching saved websites automatically; unmatched names remain available on their existing applications.
+
+### Save websites to check for jobs
+
+Open **Jobs**, then click **Job Websites** to the right of the **Job Applications** heading. Enter only the website name (for example, LinkedIn or Indeed) and click **Add Website**. Websites appear alphabetically (A–Z); scroll the list when it gets long. Rename and delete websites inside the modal. Close it with **Close**, Escape, or a click outside it.
+
+You can also open the modal using **Manage websites** below **Found on** when adding or editing an application. The dropdown updates automatically, keeping your application form intact.
 
 ## Tests
 
@@ -97,7 +116,10 @@ Run `npm test` to check application creation, editing, deletion, validation, sea
 
 ```
 server.js   — outreach routes, shared HTML layout, and Express entry point
+desktop/    — desktop window, owned local server, packaging, and smoke test
 jobs.js     — job application routes and views
+job-websites.js — saved job website routes and views
+job-websites-client.js — website modal interactions and dropdown updates
 db.js       — SQLite schema + migrations
 data.db     — SQLite database (gitignored)
 .env        — Google OAuth credentials (gitignored)

@@ -1,5 +1,5 @@
 // Job applications are recorded manually and kept separate from outreach leads.
-module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN, BTN_SM, BTN_GHOST, CARD }) {
+module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN, BTN_SM, BTN_GHOST, CARD, websiteModal }) {
   const statuses = {
     applied: 'Applied',
     interviewing: 'Interviewing',
@@ -25,6 +25,8 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
 
   function form(job = {}, error = '') {
     const editing = !!job.id;
+    const websites = db.prepare('SELECT id, name FROM job_websites ORDER BY name COLLATE NOCASE, id').all();
+    const legacySource = !job.website_id && job.source;
     return layout(editing ? 'Edit Application' : 'Add Application', `
       <div class="${CARD} p-6 max-w-xl">
         <p class="text-sm text-gray-400">Record a job you applied to and keep track of what happens next.</p>
@@ -36,16 +38,13 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
           <input id="role" name="role" class="${INPUT}" value="${esc(job.role || '')}" placeholder="e.g. Frontend Developer" maxlength="200" required>
           <label for="applied_on" class="${LABEL}">Date applied <span class="text-red-400">*</span></label>
           <input id="applied_on" name="applied_on" type="date" class="${INPUT}" value="${esc(job.applied_on ?? today())}" required>
-          <label for="source" class="${LABEL}">Found on <span class="text-gray-600">(optional)</span></label>
-          <input id="source" name="source" list="job-sources" class="${INPUT}" value="${esc(job.source || '')}" placeholder="e.g. LinkedIn, Indeed, or another website" maxlength="200" aria-describedby="source-help">
-          <datalist id="job-sources">
-            <option value="LinkedIn"></option>
-            <option value="Indeed"></option>
-            <option value="Glassdoor"></option>
-            <option value="JobStreet"></option>
-            <option value="Company website"></option>
-          </datalist>
-          <p id="source-help" class="text-xs text-gray-400 mt-1">Choose a suggestion or type any website name.</p>
+          <label for="website_id" class="${LABEL}">Found on <span class="text-gray-600">(optional)</span></label>
+          <select id="website_id" name="website_id" class="${INPUT}" aria-describedby="source-help">
+            <option value="">Not specified</option>
+            ${legacySource ? `<option value="legacy" selected>${esc(job.source)} (previously saved)</option>` : ''}
+            ${websites.map(website => `<option value="${website.id}" ${String(job.website_id) === String(website.id) ? 'selected' : ''}>${esc(website.name)}</option>`).join('')}
+          </select>
+          <p id="source-help" class="text-xs text-gray-400 mt-1">${websites.length ? 'Choose from your saved Job Websites.' : 'No websites saved yet.'} <button type="button" data-open-websites class="text-blue-400">Manage websites</button></p>
           <label for="job_url" class="${LABEL}">Job posting link <span class="text-gray-600">(optional)</span></label>
           <input id="job_url" name="job_url" type="url" class="${INPUT}" value="${esc(job.job_url || '')}" placeholder="https://..." maxlength="2000">
           <label for="status" class="${LABEL}">Status</label>
@@ -57,15 +56,18 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
             <a href="/jobs" class="${BTN_GHOST}">Cancel</a>
           </div>
         </form>
-      </div>`, { back: { href: '/jobs', label: 'Jobs' } });
+      </div>${websiteModal()}`, { back: { href: '/jobs', label: 'Jobs' } });
   }
 
-  function validate(body) {
-    const job = Object.fromEntries(['company', 'role', 'applied_on', 'source', 'job_url', 'status', 'notes'].map(key => [key, string(body[key])]));
+  function validate(body, existing = {}) {
+    const job = Object.fromEntries(['company', 'role', 'applied_on', 'website_id', 'job_url', 'status', 'notes'].map(key => [key, string(body[key])]));
+    const keepLegacy = job.website_id === 'legacy' && !existing.website_id && !!existing.source;
+    const website = /^\d+$/.test(job.website_id) ? db.prepare('SELECT id, name FROM job_websites WHERE id=?').get(job.website_id) : null;
+    job.source = keepLegacy ? existing.source : website?.name || null;
     let error = '';
     if (!job.company || !job.role) error = 'Company and job title are required.';
     else if (job.company.length > 200 || job.role.length > 200) error = 'Company and job title must be 200 characters or fewer.';
-    else if (job.source.length > 200) error = 'Website name must be 200 characters or fewer.';
+    else if (job.website_id && !website && !keepLegacy) error = 'Choose a website from your saved Job Websites.';
     else if (!/^\d{4}-\d{2}-\d{2}$/.test(job.applied_on) || !Number.isFinite(Date.parse(job.applied_on)) || new Date(job.applied_on).toISOString().slice(0, 10) !== job.applied_on) error = 'Enter a valid application date.';
     else if (!validStatus(job.status)) error = 'Choose a valid application status.';
     else if (job.notes.length > 10000) error = 'Notes must be 10,000 characters or fewer.';
@@ -77,6 +79,7 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
         error = 'Enter a valid job link starting with http:// or https://.';
       }
     }
+    if (keepLegacy) job.website_id = '';
     return { job, error };
   }
 
@@ -85,15 +88,16 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
     const status = validStatus(string(req.query.status)) ? string(req.query.status) : '';
     const conditions = [], params = [];
     if (search) {
-      conditions.push('(company LIKE ? OR role LIKE ? OR source LIKE ?)');
+      conditions.push('(company LIKE ? OR role LIKE ? OR COALESCE(w.name, j.source) LIKE ?)');
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (status) { conditions.push('status = ?'); params.push(status); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const total = db.prepare(`SELECT COUNT(*) AS n FROM job_applications ${where}`).get(...params).n;
+    const from = 'FROM job_applications j LEFT JOIN job_websites w ON w.id = j.website_id';
+    const total = db.prepare(`SELECT COUNT(*) AS n ${from} ${where}`).get(...params).n;
     const pages = Math.max(1, Math.ceil(total / 10));
     const page = Math.min(pages, Math.max(1, parseInt(string(req.query.page), 10) || 1));
-    const jobs = db.prepare(`SELECT * FROM job_applications ${where} ORDER BY applied_on DESC, id DESC LIMIT 10 OFFSET ?`).all(...params, (page - 1) * 10);
+    const jobs = db.prepare(`SELECT j.*, COALESCE(w.name, j.source) AS source_name ${from} ${where} ORDER BY j.applied_on DESC, j.id DESC LIMIT 10 OFFSET ?`).all(...params, (page - 1) * 10);
     const counts = Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM job_applications GROUP BY status').all().map(row => [row.status, row.n]));
     const allCount = Object.values(counts).reduce((sum, n) => sum + n, 0);
     const pageUrl = p => `/jobs?${new URLSearchParams({ q: search, status, page: String(p) })}`;
@@ -108,7 +112,7 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
         <td class="px-4 py-4">
           <a href="/jobs/${job.id}/edit" class="text-blue-400 font-semibold break-words">${esc(job.company)}</a>
           <div class="text-gray-300 mt-1 break-words">${esc(job.role)}</div>
-          ${job.source ? `<div class="text-xs text-gray-400 mt-2 break-words">Found on: ${esc(job.source)}</div>` : ''}
+          ${job.source_name ? `<div data-website-id="${job.website_id || ''}" class="text-xs text-gray-400 mt-2 break-words">Found on: ${esc(job.source_name)}</div>` : ''}
           ${job.job_url ? `<a href="${esc(job.job_url)}" target="_blank" rel="noopener noreferrer" class="inline-block mt-2 text-xs text-gray-400 hover:text-white underline">View job posting &#8599;</a>` : ''}
         </td>
         <td class="px-4 py-4 whitespace-nowrap text-gray-400">${esc(job.applied_on)}</td>
@@ -160,7 +164,7 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
           ${page > 1 ? `<a href="${esc(pageUrl(page - 1))}" class="text-blue-400">Previous</a>` : ''}
           ${page < pages ? `<a href="${esc(pageUrl(page + 1))}" class="text-blue-400">Next</a>` : ''}
         </div>
-      </div>`));
+      </div>${websiteModal()}`, { actions: `<button type="button" data-open-websites aria-haspopup="dialog" aria-controls="job-websites-dialog" class="${BTN_SM} shrink-0">Job Websites</button>` }));
   });
 
   app.get('/jobs/new', (req, res) => res.send(form()));
@@ -168,8 +172,8 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
   app.post('/jobs', (req, res) => {
     const { job, error } = validate(req.body);
     if (error) return res.status(400).send(form(job, error));
-    db.prepare('INSERT INTO job_applications (company, role, applied_on, source, job_url, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(job.company, job.role, job.applied_on, job.source || null, job.job_url || null, job.status, job.notes || null);
+    db.prepare('INSERT INTO job_applications (company, role, applied_on, source, website_id, job_url, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(job.company, job.role, job.applied_on, job.source, job.website_id || null, job.job_url || null, job.status, job.notes || null);
     res.redirect('/jobs');
   });
 
@@ -179,11 +183,12 @@ module.exports = function registerJobs(app, db, { layout, esc, INPUT, LABEL, BTN
   });
 
   app.post('/jobs/:id/update', (req, res) => {
-    if (!findJob(req.params.id)) return notFound(res);
-    const { job, error } = validate(req.body);
+    const existing = findJob(req.params.id);
+    if (!existing) return notFound(res);
+    const { job, error } = validate(req.body, existing);
     if (error) return res.status(400).send(form({ ...job, id: req.params.id }, error));
-    db.prepare('UPDATE job_applications SET company=?, role=?, applied_on=?, source=?, job_url=?, status=?, notes=? WHERE id=?')
-      .run(job.company, job.role, job.applied_on, job.source || null, job.job_url || null, job.status, job.notes || null, req.params.id);
+    db.prepare('UPDATE job_applications SET company=?, role=?, applied_on=?, source=?, website_id=?, job_url=?, status=?, notes=? WHERE id=?')
+      .run(job.company, job.role, job.applied_on, job.source, job.website_id || null, job.job_url || null, job.status, job.notes || null, req.params.id);
     res.redirect('/jobs');
   });
 

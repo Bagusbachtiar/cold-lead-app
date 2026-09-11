@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('node:path').join(process.env.COLDREACH_DATA_DIR || process.cwd(), '.env') });
 const express = require('express');
 const { google } = require('googleapis');
 const crypto = require('crypto');
@@ -57,7 +57,7 @@ function esc(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function layout(title, body, { back } = {}) {
+function layout(title, body, { back, actions } = {}) {
   const gmailConnected = !!getToken();
   return `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -74,10 +74,8 @@ function layout(title, body, { back } = {}) {
 
   <nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex flex-wrap items-center gap-x-8 gap-y-3">
     <a href="/" class="font-bold text-sm tracking-widest uppercase text-white">ColdReach</a>
-    <div class="flex gap-6 text-sm">
+    <div class="flex flex-wrap gap-x-6 gap-y-3 text-sm">
       <a href="/"              class="text-gray-500 hover:text-white transition-colors">Dashboard</a>
-      <a href="/leads/new"     class="text-gray-500 hover:text-white transition-colors">+ Lead</a>
-      <a href="/templates"     class="text-gray-500 hover:text-white transition-colors">Templates</a>
       <a href="/jobs"          class="text-gray-500 hover:text-white transition-colors">Jobs</a>
     </div>
     <div class="ml-auto text-xs">
@@ -89,7 +87,10 @@ function layout(title, body, { back } = {}) {
 
   <main class="max-w-4xl mx-auto px-6 py-10">
     ${back ? `<a href="${back.href}" class="inline-flex items-center text-sm text-gray-600 hover:text-gray-300 mb-6 gap-1 transition-colors">&#8592; ${esc(back.label)}</a>` : ''}
-    <h1 class="text-2xl font-bold text-white mb-6">${esc(title)}</h1>
+    ${actions ? `<div class="flex items-center justify-between gap-4 mb-6">
+      <h1 class="text-2xl font-bold text-white">${esc(title)}</h1>
+      ${actions}
+    </div>` : `<h1 class="text-2xl font-bold text-white mb-6">${esc(title)}</h1>`}
     ${body}
   </main>
 
@@ -98,7 +99,15 @@ function layout(title, body, { back } = {}) {
 }
 
 // ---- AUTH ----
-app.get('/auth/login', (req, res) => {
+app.get('/auth/login', async (req, res) => {
+  if (app.locals.ensureOAuthCallback) {
+    try { await app.locals.ensureOAuthCallback(); }
+    catch (error) {
+      return res.status(409).send(layout('Gmail Connection', `<p class="text-gray-300">${error.code === 'EADDRINUSE'
+        ? 'Another local app is using port 3000, which Google needs for this connection. Close that app temporarily, then try Connect Gmail again. Your saved records are still available in ColdReach.'
+        : 'Could not start the Gmail callback. Please close and reopen ColdReach, then try again.'}</p>`));
+    }
+  }
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/gmail.send'],
@@ -111,6 +120,10 @@ app.get('/auth/callback', async (req, res) => {
   try {
     const { tokens } = await oauth2Client.getToken(req.query.code);
     saveToken(tokens);
+    if (process.env.COLDREACH_DESKTOP === '1') {
+      app.emit('gmail-connected');
+      return res.send(layout('Gmail Connected', '<p class="text-gray-300">You can close this browser tab and return to ColdReach.</p>'));
+    }
     res.redirect('/');
   } catch (e) {
     res.status(500).send(layout('Auth Error', `<div class="${CARD} p-6 max-w-md"><p class="text-red-400 text-sm">${esc(e.message)}</p><a href="/auth/login" class="mt-4 inline-block ${BTN_GHOST}">Try again</a></div>`));
@@ -263,7 +276,7 @@ app.get('/', (req, res) => {
         </div>
       </div>
     </div>
-  `));
+  `, { actions: `<a href="/templates" class="${BTN_SM} shrink-0">Templates</a>` }));
 });
 
 // ---- LEADS ----
@@ -646,7 +659,8 @@ app.post('/templates/:id/delete', (req, res) => {
   res.redirect('/templates');
 });
 
-require('./jobs')(app, db, { layout, esc, INPUT, LABEL, BTN, BTN_SM, BTN_GHOST, CARD });
+const websiteModal = require('./job-websites')(app, db, { INPUT, LABEL, BTN, BTN_SM, BTN_GHOST });
+require('./jobs')(app, db, { layout, esc, INPUT, LABEL, BTN, BTN_SM, BTN_GHOST, CARD, websiteModal });
 
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {

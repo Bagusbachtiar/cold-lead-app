@@ -2,15 +2,24 @@
   "name": "cold-lead-app",
   "version": "1.0.0",
   "private": true,
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test tests/*.test.js",
+    "desktop": "node desktop/prepare.js && electron .",
+    "desktop:build": "node desktop/package.js",
+    "desktop:test": "node desktop/smoke.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "dotenv": "^17.4.2",
     "express": "^4.22.2",
     "googleapis": "^173.0.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.3.0",
+    "playwright-core": "^1.63.0"
   }
 }

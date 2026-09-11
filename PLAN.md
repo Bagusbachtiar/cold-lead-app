@@ -80,13 +80,23 @@ A local-only lead tracker for cold outreach (email + WhatsApp) to business owner
 ## Current status
 _(Update this section each session so context carries over.)_
 
+- User-authorized desktop extension: Electron window and bundled Node runtime, one instance at a time, local loopback server on an available port, and shutdown on window close or parent disconnect. Uses the existing project database and OAuth configuration through an explicit data directory. Gmail sign-in opens in the system browser and starts the existing port-3000 callback only when requested. No hosting, tray app, or autostart service.
+- Desktop build generated at `dist/ColdReach-win32-x64/ColdReach.exe`; project-root `ColdReach.lnk` provides one-click launch. Validation: 12 automated tests pass, plus a hidden packaged-window smoke test that created a website and linked application, closed the actual window, confirmed the server stopped, and reopened SQLite to verify persistence. Live Gmail OAuth was not exercised.
+- Created the Windows desktop shortcut at `C:\Users\intel\Desktop\ColdReach.lnk` and a backup under `backups/data-before-desktop-2026-09-11T13-05-27-798Z.db`. Final rebuilt executable passed the window/save/shutdown smoke test. Another local app occupies port 3000; ColdReach uses its own free port, but Gmail reconnect requires that fixed callback port temporarily.
+
 - Steps 1, 2, 3: all complete and pushed to main
 - App is feature-complete per the original 3-step timebox
 - User-requested extension (2026-09-09): added a Jobs page for manually tracking job applications alongside freelance outreach.
 - User-requested update (2026-09-10): optional "Found on" website field with suggestions and custom names, shown in the list and included in search. Existing applications keep their data with a blank source until edited.
+- User-requested update (2026-09-11): Job Websites page for saving website names to check for jobs. Add/Edit forms ask for the name only; includes search and create/edit/delete. Existing links and notes are preserved; new entries store an empty link for compatibility with the existing `job_websites` schema.
+- Found on now selects from saved Job Websites in Add/Edit Application, using `job_applications.website_id` as a foreign key (`ON DELETE SET NULL`). Lists/search use the current website name. Migration links matching old source names; unmatched text and deleted website names are retained as application history.
+- Navigation update: removed + Lead from the navbar and moved Templates to the right of the Dashboard H1. The dashboard's + Add Lead button remains available.
+- Job Websites now opens in a native dialog from the button beside the Job Applications H1; removed its navbar link. Add/search/edit/delete stay in the modal, and old page URLs redirect to it. Manage websites also opens it from application forms and updates Found on without losing entered data.
+- Modal simplification: removed website search, retained case-insensitive A–Z ordering, and constrained the website list to scroll independently while keeping the add form and close button visible.
+- Updated both source and packaged desktop resources. All 12 automated tests pass; the packaged-window test confirmed no search field, alphabetical ordering and scrolling with 24 websites, plus saving and shutdown.
 - Job applications: company, role, date applied, optional posting link and notes; create/edit/delete, status updates, search, filters, and pagination. Statuses: applied / interviewing / offer / rejected / withdrawn.
 - Implementation: `jobs.js` routes and views, a separate SQLite `job_applications` table, and Jobs navigation. No Gmail connection required.
-- Validation: `npm test` passes all 8 tests covering the application workflow, website sources, invalid input, persistence, existing-database migration, and preservation of outreach records; JavaScript syntax and whitespace checks passed.
+- Validation: `npm test` passes all 10 tests covering the application workflow, website relations, rename/delete behavior, saved website CRUD/search, invalid input, persistence, existing-database migration, and preservation of outreach records; JavaScript syntax and whitespace checks passed.
 
 ### What's been built
 - Leads CRUD (business name, email, wa_number, note, status, channel)
